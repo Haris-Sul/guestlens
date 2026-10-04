@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { analyzeFeedback, type AnalysisResult } from "@/server/analyze.functions";
+import { analyzeFeedback, type AnalysisResult } from "@/lib/analyze.functions";
 
 export const Route = createFileRoute("/")({
   head: () => ({
