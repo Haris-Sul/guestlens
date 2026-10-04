@@ -95,7 +95,7 @@ function Index() {
 
   const nextPhone = () => {
     phoneIdx.current = (phoneIdx.current + 1) % PHONE_NUMBERS.length;
-    setPhone(PHONE_NUMBERS[phoneIdx.current]);
+    setPhone(PHONE_NUMBERS[phoneIdx.current] ?? PHONE_NUMBERS[0]!);
   };
 
   const pushToast = (kind: Toast["kind"], text: string) => {
@@ -105,7 +105,7 @@ function Index() {
   const closeToast = (id: number) => setToasts((t) => t.filter((x) => x.id !== id));
 
   const loadSample = () => {
-    setReview(SAMPLE_REVIEWS[sampleIdx.current]);
+    setReview(SAMPLE_REVIEWS[sampleIdx.current] ?? "");
     sampleIdx.current = (sampleIdx.current + 1) % SAMPLE_REVIEWS.length;
     nextPhone();
   };
