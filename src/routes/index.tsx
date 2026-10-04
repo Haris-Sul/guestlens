@@ -67,35 +67,50 @@ const PRESET_ANALYSIS: AnalysisResult = {
   confidence: "Medium",
 };
 
-const STORAGE_KEY = "guestlens:last-analysis";
+const STORAGE_KEY = "guestlens:analysis-history";
+const LEGACY_STORAGE_KEY = "guestlens:last-analysis";
 
 type Saved = { review: string; analysis: AnalysisResult; savedAt: number };
 type Toast = { id: number; kind: "success" | "error"; text: string };
 
-function readSaved(): Saved | null {
+function readHistory(): Saved[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as Saved) : null;
+    if (raw) {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) return parsed as Saved[];
+    }
+    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+    return legacy ? [JSON.parse(legacy) as Saved] : [];
   } catch {
-    return null;
+    return [];
   }
+}
+
+function saveToHistory(entry: Saved) {
+  const history = readHistory();
+  const withoutDuplicate = history.filter((item) => item.review !== entry.review);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify([...withoutDuplicate, entry]));
 }
 
 function Index() {
   const [online, setOnline] = useState(true);
   const [review, setReview] = useState("");
-  const [phone, setPhone] = useState(PHONE_NUMBERS[0]!);
+  const [phone, setPhone] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
   const [fromDevice, setFromDevice] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [offlineHistory, setOfflineHistory] = useState<Saved[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(0);
   const sampleIdx = useRef(0);
   const phoneIdx = useRef(0);
 
   const nextPhone = () => {
+    const next = PHONE_NUMBERS[phoneIdx.current] ?? "";
+    setPhone(next);
     phoneIdx.current = (phoneIdx.current + 1) % PHONE_NUMBERS.length;
-    setPhone(PHONE_NUMBERS[phoneIdx.current] ?? PHONE_NUMBERS[0]!);
   };
 
   const pushToast = (kind: Toast["kind"], text: string) => {
@@ -110,26 +125,47 @@ function Index() {
     nextPhone();
   };
 
-  const handleReviewChange = (value: string) => {
-    if (!review.trim() && value.trim()) nextPhone();
-    setReview(value);
-  };
-
   const showResult = (result: AnalysisResult, device: boolean) => {
     setAnalysis(result);
     setDraft(result.smsDraft);
     setFromDevice(device);
   };
 
+  const selectSaved = (items: Saved[], index: number) => {
+    const saved = items[index];
+    if (!saved) return;
+    setHistoryIndex(index);
+    setReview(saved.review);
+    showResult(saved.analysis, true);
+  };
+
+  const toggleOnline = () => {
+    if (online) {
+      const saved = readHistory();
+      const available = saved.length
+        ? saved
+        : [{ review: SAMPLE_REVIEWS[0] ?? "Saved farm-tour review", analysis: PRESET_ANALYSIS, savedAt: 0 }];
+      setOfflineHistory(available);
+      selectSaved(available, available.length - 1);
+    } else {
+      setReview("");
+      setAnalysis(null);
+      setDraft(null);
+      setFromDevice(false);
+    }
+    setOnline(!online);
+  };
+
+  const moveSaved = (direction: -1 | 1) => {
+    if (!offlineHistory.length) return;
+    const nextIndex = (historyIndex + direction + offlineHistory.length) % offlineHistory.length;
+    selectSaved(offlineHistory, nextIndex);
+  };
+
   const handleAnalyze = async () => {
     if (!online) {
-      const saved = readSaved();
-      if (saved) {
-        if (!review.trim()) setReview(saved.review);
-        showResult(saved.analysis, true);
-      } else {
-        showResult(PRESET_ANALYSIS, true);
-      }
+      const saved = offlineHistory[historyIndex];
+      if (saved) showResult(saved.analysis, true);
       return;
     }
     setAnalyzing(true);
@@ -137,10 +173,7 @@ function Index() {
       const result = await analyzeFeedback({ data: { review } });
       showResult(result, false);
       try {
-        localStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify({ review, analysis: result, savedAt: Date.now() } satisfies Saved),
-        );
+        saveToHistory({ review, analysis: result, savedAt: Date.now() });
       } catch {
         /* storage full or unavailable */
       }
@@ -165,25 +198,31 @@ function Index() {
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-10 border-b border-border bg-card/95 backdrop-blur">
-        <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-3">
-          <h1 className="text-xl font-bold tracking-tight text-primary">GuestLens</h1>
-          <button
-            onClick={() => setOnline(!online)}
-            className="flex items-center gap-2 rounded-full border border-border bg-secondary px-3 py-1.5 text-sm font-medium text-secondary-foreground transition-colors hover:bg-muted"
-            aria-pressed={!online}
-          >
-            {online ? "🟢 Online" : "🟠 Offline"}
-          </button>
+        <div className="mx-auto flex max-w-2xl items-center justify-between gap-3 px-4 py-3">
+          <h1 className="text-2xl font-bold text-primary">GuestLens</h1>
+          <div className="flex items-center gap-3">
+            <div className="hidden items-center gap-2 text-base font-semibold text-card-foreground sm:flex" aria-label="Current operator Amina">
+              <span className="grid size-9 place-items-center rounded-full bg-primary text-primary-foreground" aria-hidden="true">●</span>
+              <span>Amina</span>
+            </div>
+            <button
+              onClick={toggleOnline}
+              className="flex items-center gap-2 rounded-full border border-border bg-secondary px-3 py-2 text-base font-semibold text-secondary-foreground transition-colors hover:bg-muted"
+              aria-pressed={!online}
+            >
+              {online ? "🟢 Online" : "🟠 Offline"}
+            </button>
+          </div>
         </div>
         {!online && (
-          <div className="bg-warning/15 px-4 py-2 text-center text-sm font-medium text-warning">
+          <div className="bg-warning/15 px-4 py-2 text-center text-base font-medium text-warning">
             🟠 Offline (Store-and-Forward Mode) — Offline mode active. Reviews cached locally.
           </div>
         )}
       </header>
 
       {/* Toasts */}
-      <div className="pointer-events-none fixed inset-x-0 top-16 z-20 mx-auto flex max-w-2xl flex-col gap-2 px-4">
+      <div className="mx-auto flex max-w-2xl flex-col gap-2 px-4 pt-3" aria-live="polite">
         {toasts.map((t) => (
           <ToastItem key={t.id} toast={t} onClose={() => closeToast(t.id)} />
         ))}
@@ -191,44 +230,57 @@ function Index() {
 
       <main className="mx-auto max-w-2xl space-y-6 px-4 py-6 pb-16">
         <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-          <h2 className="text-lg font-semibold text-card-foreground">1. Input Reviews</h2>
+          <h2 className="text-xl font-semibold text-card-foreground">1. Input Reviews</h2>
           <button
             onClick={loadSample}
-            className="mt-3 w-full rounded-xl border border-primary/40 bg-secondary px-4 py-2.5 text-sm font-semibold text-primary transition-colors hover:bg-muted"
+            disabled={!online}
+            className="mt-3 w-full rounded-xl border border-primary/40 bg-secondary px-4 py-3 text-base font-semibold text-primary transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
           >
             Load Sample Yelp Review
           </button>
           <textarea
             value={review}
-            onChange={(e) => handleReviewChange(e.target.value)}
+            onChange={(e) => setReview(e.target.value)}
+            readOnly={!online}
             placeholder="Paste or type a guest review here…"
             rows={6}
-            className="mt-3 w-full rounded-xl border border-input bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            className="mt-3 w-full rounded-xl border border-input bg-background px-4 py-3 text-base leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring read-only:cursor-default read-only:bg-muted"
           />
+          {!online && (
+            <div className="mt-3 flex items-center justify-between rounded-xl border border-border bg-secondary px-3 py-2">
+              <button onClick={() => moveSaved(-1)} aria-label="Previous saved review" className="grid size-11 place-items-center rounded-lg text-2xl text-primary transition-colors hover:bg-muted">←</button>
+              <span className="text-base font-semibold text-secondary-foreground">Saved review {historyIndex + 1} of {offlineHistory.length}</span>
+              <button onClick={() => moveSaved(1)} aria-label="Next saved review" className="grid size-11 place-items-center rounded-lg text-2xl text-primary transition-colors hover:bg-muted">→</button>
+            </div>
+          )}
           <label className="mt-3 block">
-            <span className="text-sm font-medium text-muted-foreground">Guest SMS Number</span>
-            <input
-              type="tel"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-            />
+            <span className="text-base font-medium text-muted-foreground">Guest SMS Number</span>
+            <span className="mt-1 flex gap-2">
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="Enter guest number"
+                className="min-w-0 flex-1 rounded-xl border border-input bg-background px-4 py-3 text-base text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <button type="button" onClick={nextPhone} aria-label="Load another phone number" title="Load another phone number" className="grid size-12 shrink-0 place-items-center rounded-xl border border-primary/40 bg-secondary text-xl text-primary transition-colors hover:bg-muted">↻</button>
+            </span>
           </label>
         </section>
 
         <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-          <h2 className="text-lg font-semibold text-card-foreground">2. AI Insight Dashboard</h2>
+          <h2 className="text-xl font-semibold text-card-foreground">2. AI Insight Dashboard</h2>
           <button
             onClick={handleAnalyze}
             disabled={analyzing || (online && !review.trim())}
-            className="mt-3 w-full rounded-xl bg-primary px-4 py-3 text-sm font-bold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="mt-3 w-full rounded-xl bg-primary px-4 py-3 text-base font-bold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {analyzing ? "Analyzing…" : "Analyze Feedback"}
           </button>
           {analysis && (
             <div className="mt-4 space-y-3">
               {fromDevice && (
-                <div className="inline-flex items-center rounded-full border border-warning/40 bg-warning/15 px-3 py-1.5 text-xs font-semibold text-warning">
+                <div className="inline-flex items-center rounded-full border border-warning/40 bg-warning/15 px-3 py-1.5 text-sm font-semibold text-warning">
                   ⚡ Loaded from device storage
                 </div>
               )}
@@ -241,7 +293,7 @@ function Index() {
 
         {analysis && draft !== null && (
           <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-            <h2 className="text-lg font-semibold text-card-foreground">
+            <h2 className="text-xl font-semibold text-card-foreground">
               3. Guest Follow-Up (Human Approval)
             </h2>
             <textarea
@@ -249,17 +301,17 @@ function Index() {
               onChange={(e) => setDraft(e.target.value)}
               placeholder="AI-drafted SMS will appear here…"
               rows={4}
-              className="mt-3 w-full rounded-xl border border-input bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              className="mt-3 w-full rounded-xl border border-input bg-background px-4 py-3 text-base leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
             <div
-              className={`mt-3 inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-semibold ${confidenceStyles[analysis.confidence]}`}
+              className={`mt-3 inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-semibold ${confidenceStyles[analysis.confidence]}`}
             >
               ⚠️ AI Confidence: {analysis.confidence} — Human Approval Required
             </div>
             <button
               onClick={handleApproveSend}
               disabled={!draft.trim()}
-              className="mt-3 w-full rounded-xl bg-success px-4 py-3 text-sm font-bold text-success-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-3 w-full rounded-xl bg-success px-4 py-3 text-base font-bold text-success-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Approve &amp; Send SMS
             </button>
@@ -283,7 +335,7 @@ function ToastItem({ toast, onClose }: { toast: Toast; onClose: () => void }) {
   return (
     <div
       role="alert"
-      className={`pointer-events-auto flex items-start gap-3 rounded-xl border-2 px-4 py-3 text-sm font-semibold shadow-lg ${styles}`}
+      className={`flex items-start gap-3 rounded-xl border-2 px-4 py-3 text-base font-semibold shadow-lg ${styles}`}
     >
       <span className="flex-1">{toast.text}</span>
       <button onClick={onClose} aria-label="Close notification" className="px-1 text-base leading-none opacity-80 hover:opacity-100">
@@ -304,10 +356,10 @@ function InsightCard({
 }) {
   return (
     <div className="rounded-xl border border-border bg-secondary/60 p-4">
-      <h3 className="text-sm font-bold text-primary">
+      <h3 className="text-base font-bold text-primary">
         {emoji} {title}
       </h3>
-      <p className="mt-1.5 text-sm leading-relaxed text-card-foreground">
+      <p className="mt-1.5 text-base leading-relaxed text-card-foreground">
         {insight.swahili} <span className="text-muted-foreground">({insight.english})</span>
       </p>
     </div>
