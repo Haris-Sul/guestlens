@@ -38,7 +38,7 @@ export const analyzeFeedback = createServerFn({ method: "POST" })
     return { review: data.review.slice(0, 4000) };
   })
   .handler(async ({ data }): Promise<AnalysisResult> => {
-    const apiKey = process.env.LOVABLE_API_KEY;
+    const apiKey = process.env["LOVABLE_API_KEY"];
     if (!apiKey) throw new Error("AI is not configured for this app.");
 
     const runIdFetch = createLovableAiGatewayRunIdFetch();
