@@ -84,7 +84,7 @@ function readSaved(): Saved | null {
 function Index() {
   const [online, setOnline] = useState(true);
   const [review, setReview] = useState("");
-  const [phone, setPhone] = useState(PHONE_NUMBERS[0]);
+  const [phone, setPhone] = useState(PHONE_NUMBERS[0]!);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
